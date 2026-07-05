@@ -23,18 +23,18 @@ from telegram.ext import (
 
 import yt_dlp
 
+import config
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = config.BOT_TOKEN
 
 # نخزن نتائج البحث الأخيرة لكل مستخدم حتى يختار الصيغة (صوت/فيديو)
 SEARCH_CACHE: dict[int, dict] = {}
-
-MAX_TELEGRAM_FILE_SIZE = 50 * 1024 * 1024  # 50MB - حد بوتات تيلجرام العادية
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,7 +60,7 @@ def search_tiktok(query: str) -> dict | None:
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "default_search": "tiktoksearch1",
+        "default_search": config.TIKTOK_SEARCH_PREFIX,
         "noplaylist": True,
         "skip_download": True,
     }
@@ -90,7 +90,7 @@ def download_media(url: str, want_audio: bool, out_dir: str) -> str | None:
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "192",
+                    "preferredquality": config.AUDIO_QUALITY,
                 }
             ],
         }
@@ -183,7 +183,7 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await query_cb.message.reply_text("تعذر تحميل الملف، حاول مرة أخرى.")
             return
 
-        if os.path.getsize(file_path) > MAX_TELEGRAM_FILE_SIZE:
+        if os.path.getsize(file_path) > config.MAX_TELEGRAM_FILE_SIZE:
             await query_cb.message.reply_text(
                 "حجم الملف أكبر من الحد المسموح به للإرسال عبر البوت."
             )
