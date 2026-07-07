@@ -1,225 +1,163 @@
-"""
-بوت تيلجرام لاستخراج الملفات الصوتية والمرئية من تيك توك.
-المستخدم يكتب اسم الأغنية/النشيد، والبوت يبحث في تيك توك ويرسل له
-الفيديو والصوت المستخرج منه.
-"""
-
-import logging
 import os
-import tempfile
-import shutil
-from pathlib import Path
-
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ChatAction
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
-
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
 
-import config
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "ضع_التوكن_هنا")
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
-)
-logger = logging.getLogger(__name__)
-
-BOT_TOKEN = config.BOT_TOKEN
-
-# نخزن نتائج البحث الأخيرة لكل مستخدم حتى يختار الصيغة (صوت/فيديو)
-SEARCH_CACHE: dict[int, dict] = {}
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "أهلاً بك! 👋\n\n"
-        "أرسل لي اسم الأغنية أو النشيد الذي تريده، وسأبحث لك عنه في تيك توك "
-        "وأرسل لك الفيديو أو الصوت المستخرج منه.\n\n"
-        "مثال: أرسل فقط اسم النشيد بدون أي شيء آخر."
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    welcome_text = (
+        "🏴 **مَكْتَبَةُ الأَنَاشِيدِ الجِهَادِيَّةِ** 🏴\n\n"
+        "\"إِنَّ مِنَ البَيَانِ لَسِحْراً، وَإِنَّ مِنَ الشِّعْرِ لَحِكْمَةً\"\n\n"
+        "مرحباً بك في منبر الكلمة الصادقة واللحن الحادي. أرسل الآن **اسم الأنشودة**، "
+        "لتبحر في مكتبة تجمع بين زئير الصوتيات وعز المرتجيات بصيغتي الصوت والفيديو.\n\n"
+        "ーーー\n"
+        "**وفي ظلال هذا الصرح، تحيةٌ معطرة بعبق المجد لأميرة البيت وعنوان الثبات: (الأندلسية)** 🪶\n\n"
+        "هِيَ الأَنْدَلُسِيَّةُ فِي لَهِيبِ المَعَامِعِ المَجْدُ مَسْكَنُهَا\n"
+        "سَلِيلَةُ عِزٍّ بِالعَقِيدَةِ وَالفِدَا تَسْمُو بِمَوْطِنِهَا\n\n"
+        "خَاضَتْ فِجَاجَ الحَرْبِ ثَابِتَةَ الخُطَى لَا تَنْثَنِي\n"
+        "زَوْجٌ كَمِثْلِ السَّيْفِ فِي كَفِّ الـمُجَاهِدِ مَعْدِنُهَا"
     )
+    await update.message.reply_text(text=welcome_text, parse_mode="Markdown")
 
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "طريقة الاستخدام:\n"
-        "1. اكتب اسم الأغنية أو النشيد.\n"
-        "2. سيبحث البوت في تيك توك ويعرض لك أفضل نتيجة.\n"
-        "3. اختر إن كنت تريد الفيديو أو الصوت فقط."
-    )
-
-
-def search_tiktok(query: str) -> dict | None:
-    """يبحث في تيك توك عن أول نتيجة مطابقة للاستعلام ويعيد معلوماتها."""
+# دالة البحث في يوتيوب (أسرع وأضمن)
+def search_youtube_results(query):
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "default_search": config.TIKTOK_SEARCH_PREFIX,
-        "noplaylist": True,
-        "skip_download": True,
+        'default_search': 'ytsearch3',  # البحث في يوتيوب وجلب أول 3 نتائج
+        'quiet': True,
+        'noplaylist': True,
+        'extract_flat': True
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(query, download=False)
-        if not info:
-            return None
-        if "entries" in info:
-            entries = [e for e in info["entries"] if e]
-            if not entries:
-                return None
-            return entries[0]
-        return info
+        info = ydl.extract_info(f"أنشودة {query}", download=False) # يضيف كلمة أنشودة تلقائياً لضمان الدقة
+        if 'entries' in info:
+            return info['entries'][:3]
+        return []
 
-
-def download_media(url: str, want_audio: bool, out_dir: str) -> str | None:
-    """يحمّل الفيديو أو يستخرج الصوت منه ويعيد مسار الملف الناتج."""
-    out_template = str(Path(out_dir) / "%(id)s.%(ext)s")
-
-    if want_audio:
+def download_media(url, download_type):
+    if download_type == "audio":
         ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "outtmpl": out_template,
-            "format": "bestaudio/best",
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": config.AUDIO_QUALITY,
-                }
-            ],
+            'format': 'bestaudio/best',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'quiet': True
         }
     else:
         ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "outtmpl": out_template,
-            "format": "mp4/bestvideo+bestaudio/best",
-            "merge_output_format": "mp4",
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'quiet': True
         }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
-        if want_audio:
-            filename = str(Path(filename).with_suffix(".mp3"))
-        if os.path.exists(filename):
-            return filename
-    return None
+        if download_type == "audio":
+            actual_filename = os.path.splitext(filename)[0] + ".mp3"
+        else:
+            actual_filename = filename
+        return actual_filename, info.get('title', 'أنشودة مستخرجة')
 
-
-async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = (update.message.text or "").strip()
-    if not query:
+async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    if len(query) < 2:
+        await update.message.reply_text("يرجى كتابة اسم واضح للأنشودة.")
         return
 
-    user_id = update.effective_user.id
-    status_msg = await update.message.reply_text(f"🔎 جاري البحث عن: {query} ...")
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+    status_message = await update.message.reply_text(f"🔍 جاري البحث عن: ({query})...")
 
     try:
-        result = search_tiktok(query)
-    except Exception:
-        logger.exception("فشل البحث في تيك توك")
-        result = None
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(None, search_youtube_results, query)
 
-    if not result:
-        await status_msg.edit_text(
-            "لم أجد أي نتيجة لهذا الاسم على تيك توك. حاول بكتابة اسم آخر أو أدق."
-        )
-        return
+        if not results:
+            await status_message.edit_text("❌ لم يتم العثور على نتائج. جرب كتابة اسم الأنشودة بشكل صحيح.")
+            return
 
-    title = result.get("title") or result.get("description") or query
-    url = result.get("webpage_url") or result.get("url")
-    if not url:
-        await status_msg.edit_text("حدث خطأ أثناء جلب رابط النتيجة، حاول مرة أخرى.")
-        return
+        keyboard = []
+        for idx, entry in enumerate(results):
+            title = entry.get('title', f'نتيجة {idx+1}')
+            short_title = title[:40] + "..." if len(title) > 40 else title
+            video_url = entry.get('url') if entry.get('url') else f"https://youtube.com{entry.get('id')}"
 
-    SEARCH_CACHE[user_id] = {"url": url, "title": title}
+            context.user_data[f"url_{idx}"] = video_url
+            context.user_data[f"title_{idx}"] = title
 
-    keyboard = InlineKeyboardMarkup(
-        [
+            keyboard.append([InlineKeyboardButton(f"🎵 {short_title}", callback_data=f"select_{idx}")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await status_message.delete()
+        await update.message.reply_text("📌 اختر النتيجة الأقرب لطلبك:", reply_markup=reply_markup)
+
+    except Exception as e:
+        print(f"Search Error: {e}")
+        await status_message.edit_text("❌ حدث خطأ أثناء البحث. جرب مجدداً.")
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("select_"):
+        idx = data.split("_")[1]
+        context.user_data["current_url"] = context.user_data.get(f"url_{idx}")
+        context.user_data["current_title"] = context.user_data.get(f"title_{idx}")
+
+        keyboard = [
             [
-                InlineKeyboardButton("🎬 فيديو", callback_data="video"),
-                InlineKeyboardButton("🎵 صوت فقط", callback_data="audio"),
+                InlineKeyboardButton("🎧 تحميل كصوت (MP3)", callback_data="download_audio"),
+                InlineKeyboardButton("🎬 تحميل كفيديو (MP4)", callback_data="download_video")
             ]
         ]
-    )
-    await status_msg.edit_text(
-        f"وجدت هذه النتيجة:\n\n📌 {title}\n\nما الذي تريد إرساله؟",
-        reply_markup=keyboard,
-    )
-
-
-async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query_cb = update.callback_query
-    await query_cb.answer()
-
-    user_id = update.effective_user.id
-    data = SEARCH_CACHE.get(user_id)
-    if not data:
-        await query_cb.edit_message_text("انتهت صلاحية هذه النتيجة، أرسل اسم النشيد من جديد من فضلك.")
-        return
-
-    want_audio = query_cb.data == "audio"
-    await query_cb.edit_message_text(
-        f"⏳ جاري تحضير الـ{'صوت' if want_audio else 'فيديو'}، يرجى الانتظار..."
-    )
-
-    tmp_dir = tempfile.mkdtemp(prefix="tiktok_")
-    try:
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action=ChatAction.RECORD_VOICE if want_audio else ChatAction.UPLOAD_VIDEO,
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text=f"📋 الخيار المختار:\n*{context.user_data['current_title']}*\n\nاختر نوع التحميل:",
+            parse_mode="Markdown",
+            reply_markup=reply_markup
         )
-        file_path = download_media(data["url"], want_audio, tmp_dir)
 
-        if not file_path or not os.path.exists(file_path):
-            await query_cb.message.reply_text("تعذر تحميل الملف، حاول مرة أخرى.")
-            return
+    elif data in ["download_audio", "download_video"]:
+        download_type = "audio" if data == "download_audio" else "video"
+        url = context.user_data.get("current_url")
+        title = context.user_data.get("current_title")
 
-        if os.path.getsize(file_path) > config.MAX_TELEGRAM_FILE_SIZE:
-            await query_cb.message.reply_text(
-                "حجم الملف أكبر من الحد المسموح به للإرسال عبر البوت."
-            )
-            return
+        await query.edit_message_text(text="⏳ جاري التحميل والمعالجة، يرجى الانتظار...")
 
-        caption = data.get("title") or ""
-        with open(file_path, "rb") as f:
-            if want_audio:
-                await context.bot.send_audio(
-                    chat_id=update.effective_chat.id, audio=f, caption=caption
-                )
+        try:
+            loop = asyncio.get_event_loop()
+            media_path, final_title = await loop.run_in_executor(None, download_media, url, download_type)
+
+            if os.path.exists(media_path):
+                await query.edit_message_text(text="⚡ جاري الرفع المنظم إلى تيلجرام...")
+
+                with open(media_path, 'rb') as file:
+                    if download_type == "audio":
+                        await query.message.reply_audio(audio=file, title=final_title, caption=f"🎧 {final_title}")
+                    else:
+                        await query.message.reply_video(video=file, caption=f"🎬 {final_title}")
+
+                os.remove(media_path)
+                await query.message.delete()
             else:
-                await context.bot.send_video(
-                    chat_id=update.effective_chat.id, video=f, caption=caption
-                )
-    except Exception:
-        logger.exception("فشل تحميل/إرسال الملف")
-        await query_cb.message.reply_text("حدث خطأ غير متوقع أثناء المعالجة، حاول مرة أخرى.")
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+                await query.edit_message_text("❌ فشل معالجة الملف.")
 
+        except Exception as e:
+            print(f"Error: {e}")
+            await query.edit_message_text("❌ حدث خطأ أثناء جلب الملف.")
 
-def main() -> None:
-    if not BOT_TOKEN:
-        raise RuntimeError("متغير البيئة TELEGRAM_BOT_TOKEN غير موجود.")
+def main():
+    if not os.path.exists('downloads'):
+        os.makedirs('downloads')
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.run_polling()
 
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(handle_choice))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
-
-    logger.info("البوت يعمل الآن...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
