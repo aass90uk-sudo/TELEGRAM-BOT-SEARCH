@@ -14,29 +14,43 @@
 
 ---
 
-## 🚀 التشغيل على Railway
+## 📁 هيكل المشروع
 
-### 1. المتطلبات
+```
+├── telegram-bot/           ← مجلد البوت (هذا ما يُنشر على Railway)
+│   ├── bot.py              ← الكود الرئيسي للبوت
+│   ├── config.py           ← إعدادات البوت
+│   ├── requirements.txt    ← مكتبات Python
+│   ├── Dockerfile          ← للبناء على Railway
+│   └── railway.toml        ← إعدادات Railway
+└── README.md
+```
+
+---
+
+## 🚀 النشر على Railway
+
+### المتطلبات
 - حساب [Railway](https://railway.app)
 - توكن بوت تيلجرام من [@BotFather](https://t.me/BotFather)
 
-### 2. النشر
-1. ارفع المستودع على GitHub
-2. في Railway: **New Project → Deploy from GitHub repo**
-3. اختر هذا المستودع
-4. أضف متغير البيئة:
+### الخطوات
 
-```
-TELEGRAM_BOT_TOKEN=your_token_here
-```
+1. **ربط المستودع:**
+   - في Railway: **New Project → Deploy from GitHub repo**
+   - اختر هذا المستودع
 
-5. Railway سيبني الـ Docker تلقائياً وسيشغّل البوت
+2. **⚠️ مهم — تعيين مجلد الجذر:**
+   - افتح إعدادات الخدمة → **Settings → Source**
+   - غيّر **Root Directory** إلى: `telegram-bot`
+   - هذا يجعل Railway يرى فقط مجلد البوت ويتجاهل باقي الملفات
 
-### 3. متغيرات البيئة
+3. **إضافة متغير البيئة:**
+   ```
+   TELEGRAM_BOT_TOKEN = توكن_البوت_من_BotFather
+   ```
 
-| المتغير | الوصف | مطلوب |
-|---------|-------|--------|
-| `TELEGRAM_BOT_TOKEN` | توكن البوت من @BotFather | ✅ نعم |
+4. اضغط **Deploy** — Railway سيبني الـ Docker تلقائياً
 
 ---
 
@@ -44,47 +58,30 @@ TELEGRAM_BOT_TOKEN=your_token_here
 
 ```bash
 # تثبيت المتطلبات
-pip install -r requirements.txt
+pip install -r telegram-bot/requirements.txt
 
 # تعيين التوكن
 export TELEGRAM_BOT_TOKEN=your_token_here
 
 # تشغيل البوت
-python bot.py
+python telegram-bot/bot.py
 ```
 
-> **ملاحظة:** يجب تثبيت `ffmpeg` على النظام لاستخراج الصوت.
-> - Linux: `apt install ffmpeg`
-> - Mac: `brew install ffmpeg`
-> - Windows: [تحميل من الموقع الرسمي](https://ffmpeg.org/download.html)
+> يجب تثبيت `ffmpeg`: `apt install ffmpeg` أو `brew install ffmpeg`
 
 ---
 
-## 📁 هيكل المشروع
-
-```
-├── bot.py          # الكود الرئيسي للبوت
-├── config.py       # إعدادات البوت
-├── requirements.txt # مكتبات Python
-├── Dockerfile       # للنشر على Railway/Docker
-├── railway.toml     # إعدادات Railway
-└── README.md        # هذا الملف
-```
-
----
-
-## 📦 المكتبات المستخدمة
+## 📦 المكتبات
 
 | المكتبة | الإصدار | الاستخدام |
 |---------|---------|-----------|
 | `python-telegram-bot` | 22.8 | واجهة تيلجرام |
-| `yt-dlp` | 2026.7.4 | البحث والتحميل من يوتيوب |
+| `yt-dlp` | 2026.7.4 | البحث والتحميل |
 | `ffmpeg` | نظام | استخراج الصوت |
 
 ---
 
 ## ⚠️ ملاحظات
 
-- الحد الأقصى لحجم الملف عبر البوتات **50MB** (حد تيلجرام)
-- الملفات الأكبر من ذلك لن تُرسل
+- الحد الأقصى لحجم الملف عبر البوتات **50MB**
 - الملفات المؤقتة تُحذف تلقائياً بعد الإرسال

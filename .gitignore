@@ -53,3 +53,7 @@ __pycache__/
 *.pyc
 .pythonlibs/
 .upm/
+
+# Bot downloads (temp files)
+downloads/
+telegram-bot/downloads/

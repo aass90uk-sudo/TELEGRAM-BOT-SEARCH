@@ -4,7 +4,7 @@
 
 ## Run & Operate
 
-- `python bot.py` — يشغّل البوت (يعمل عبر workflow باسم "Telegram Bot")
+- `python telegram-bot/bot.py` — يشغّل البوت (يعمل عبر workflow باسم "Telegram Bot")
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
