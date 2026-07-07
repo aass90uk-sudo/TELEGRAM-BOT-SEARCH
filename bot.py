@@ -6,23 +6,21 @@ import yt_dlp
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🏴 **مَكْتَبَةُ الأَنَاشِيدِ الجِهَادِيَّةِ** 🏴\n\n"
-        "\"إِنَّ مِنَ البَيَانِ لَسِحْراً، وَإِنَّ مِنَ الشِّعْرِ لَحِكْمَةً\"\n\n"
-        "مرحباً بك في منبر الكلمة الصادقة واللحن الحادي. أرسل الآن **اسم الأنشودة**، "
-        "لتبحر في مكتبة تجمع بين زئير الصوتيات وعز المرتجيات بصيغتي الصوت والفيديو.\n\n"
-        "ーーー\n"
-        "**وفي ظلال هذا الصرح، تحيةٌ معطرة بعبق المجد لأميرة البيت وعنوان الثبات: (الأندلسية)** 🪶\n\n"
-        "هِيَ الأَنْدَلُسِيَّةُ فِي لَهِيبِ المَعَامِعِ المَجْدُ مَسْكَنُهَا\n"
-        "سَلِيلَةُ عِزٍّ بِالعَقِيدَةِ وَالفِدَا تَسْمُو بِمَوْطِنِهَا\n\n"
-        "خَاضَتْ فِجَاجَ الحَرْبِ ثَابِتَةَ الخُطَى لَا تَنْثَنِي\n"
-        "زَوْجٌ كَمِثْلِ السَّيْفِ فِي كَفِّ الـمُجَاهِدِ مَعْدِنُهَا"
-    )
-    await update.message.reply_text(text=welcome_text, parse_mode="Markdown")
+RESULTS_PER_PAGE = 5   # عدد النتائج في كل صفحة
+TOTAL_RESULTS    = 20  # إجمالي النتائج التي يجلبها البوت
 
-# دالة البحث في يوتيوب (أسرع وأضمن)
-def search_youtube_results(query):
+# ─────────────────────────────────────────────
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🎵 *بوت الأناشيد*\n\n"
+        "أرسل اسم النشيد أو الأغنية وسأبحث لك عنها في يوتيوب.\n"
+        "ستظهر لك النتائج على صفحات، تنقّل بينها واختر ما يناسبك.",
+        parse_mode="Markdown"
+    )
+
+# ─────────────────────────────────────────────
+def search_youtube_results(query: str, count: int = TOTAL_RESULTS) -> list:
+    """يجلب (count) نتيجة من يوتيوب للاستعلام المعطى."""
     ydl_opts = {
         'quiet': True,
         'noplaylist': True,
@@ -30,12 +28,57 @@ def search_youtube_results(query):
         'skip_download': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+        info = ydl.extract_info(f"ytsearch{count}:{query}", download=False)
         if info and 'entries' in info:
-            return [e for e in info['entries'] if e][:5]
-        return []
+            return [e for e in info['entries'] if e]
+    return []
 
-def download_media(url, download_type):
+# ─────────────────────────────────────────────
+def build_results_keyboard(results: list, page: int) -> InlineKeyboardMarkup:
+    """يبني لوحة المفاتيح لصفحة معينة من النتائج."""
+    total_pages = max(1, (len(results) + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE)
+    start = page * RESULTS_PER_PAGE
+    end   = start + RESULTS_PER_PAGE
+    page_results = results[start:end]
+
+    keyboard = []
+
+    # أزرار النتائج
+    for i, entry in enumerate(page_results):
+        abs_idx   = start + i
+        title     = entry.get('title') or f'نتيجة {abs_idx + 1}'
+        short     = title[:45] + "…" if len(title) > 45 else title
+        duration  = entry.get('duration')
+        dur_str   = f"  [{int(duration//60)}:{int(duration%60):02d}]" if duration else ""
+        keyboard.append([
+            InlineKeyboardButton(f"🎵 {short}{dur_str}", callback_data=f"select_{abs_idx}")
+        ])
+
+    # أزرار التنقل بين الصفحات
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ السابق", callback_data=f"page_{page - 1}"))
+    nav.append(InlineKeyboardButton(f"📄 {page + 1} / {total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("التالي ▶️", callback_data=f"page_{page + 1}"))
+    keyboard.append(nav)
+
+    return InlineKeyboardMarkup(keyboard)
+
+# ─────────────────────────────────────────────
+def results_header(query: str, page: int, total: int) -> str:
+    total_pages = max(1, (total + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE)
+    start = page * RESULTS_PER_PAGE + 1
+    end   = min(start + RESULTS_PER_PAGE - 1, total)
+    return (
+        f"🔎 نتائج البحث عن: *{query}*\n"
+        f"عرض {start}–{end} من أصل {total} نتيجة  |  صفحة {page + 1} من {total_pages}\n\n"
+        "اختر النشيد الذي تريده:"
+    )
+
+# ─────────────────────────────────────────────
+def download_media(url: str, download_type: str) -> tuple[str, str]:
+    os.makedirs('downloads', exist_ok=True)
     if download_type == "audio":
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -45,119 +88,160 @@ def download_media(url, download_type):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'quiet': True
+            'quiet': True,
         }
     else:
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'quiet': True
+            'quiet': True,
         }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info     = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
         if download_type == "audio":
-            actual_filename = os.path.splitext(filename)[0] + ".mp3"
-        else:
-            actual_filename = filename
-        return actual_filename, info.get('title', 'أنشودة مستخرجة')
+            filename = os.path.splitext(filename)[0] + ".mp3"
+        return filename, info.get('title', 'نشيد')
 
+# ─────────────────────────────────────────────
 async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.strip()
     if len(query) < 2:
         await update.message.reply_text("يرجى كتابة اسم واضح للأنشودة.")
         return
 
-    status_message = await update.message.reply_text(f"🔍 جاري البحث عن: ({query})...")
+    status = await update.message.reply_text(f"🔍 جاري البحث عن: *{query}* …", parse_mode="Markdown")
 
     try:
-        loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(None, search_youtube_results, query)
+        loop    = asyncio.get_event_loop()
+        results = await loop.run_in_executor(None, search_youtube_results, query, TOTAL_RESULTS)
 
         if not results:
-            await status_message.edit_text("❌ لم يتم العثور على نتائج. جرب كتابة اسم الأنشودة بشكل صحيح.")
+            await status.edit_text("❌ لم أجد نتائج. جرّب كتابة الاسم بشكل مختلف.")
             return
 
-        keyboard = []
-        for idx, entry in enumerate(results):
-            title = entry.get('title', f'نتيجة {idx+1}')
-            short_title = title[:40] + "..." if len(title) > 40 else title
-            video_url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
+        # حفظ النتائج ومعلومات الصفحة في بيانات المستخدم
+        context.user_data['results'] = results
+        context.user_data['query']   = query
+        context.user_data['page']    = 0
 
-            context.user_data[f"url_{idx}"] = video_url
-            context.user_data[f"title_{idx}"] = title
-
-            keyboard.append([InlineKeyboardButton(f"🎵 {short_title}", callback_data=f"select_{idx}")])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await status_message.delete()
-        await update.message.reply_text("📌 اختر النتيجة الأقرب لطلبك:", reply_markup=reply_markup)
+        await status.edit_text(
+            text         = results_header(query, 0, len(results)),
+            reply_markup = build_results_keyboard(results, 0),
+            parse_mode   = "Markdown"
+        )
 
     except Exception as e:
         print(f"Search Error: {e}")
-        await status_message.edit_text("❌ حدث خطأ أثناء البحث. جرب مجدداً.")
+        await status.edit_text("❌ حدث خطأ أثناء البحث. جرّب مجدداً.")
 
+# ─────────────────────────────────────────────
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
+    cb   = update.callback_query
+    data = cb.data
+    await cb.answer()
 
-    if data.startswith("select_"):
-        idx = data.split("_")[1]
-        context.user_data["current_url"] = context.user_data.get(f"url_{idx}")
-        context.user_data["current_title"] = context.user_data.get(f"title_{idx}")
+    # ── زر بلا وظيفة (مؤشر الصفحة) ──────────────────
+    if data == "noop":
+        return
 
-        keyboard = [
-            [
-                InlineKeyboardButton("🎧 تحميل كصوت (MP3)", callback_data="download_audio"),
-                InlineKeyboardButton("🎬 تحميل كفيديو (MP4)", callback_data="download_video")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"📋 الخيار المختار:\n*{context.user_data['current_title']}*\n\nاختر نوع التحميل:",
-            parse_mode="Markdown",
-            reply_markup=reply_markup
+    # ── التنقل بين الصفحات ───────────────────────────
+    if data.startswith("page_"):
+        page    = int(data.split("_")[1])
+        results = context.user_data.get('results', [])
+        query   = context.user_data.get('query', '')
+        context.user_data['page'] = page
+
+        await cb.edit_message_text(
+            text         = results_header(query, page, len(results)),
+            reply_markup = build_results_keyboard(results, page),
+            parse_mode   = "Markdown"
         )
+        return
 
-    elif data in ["download_audio", "download_video"]:
+    # ── اختيار نتيجة ─────────────────────────────────
+    if data.startswith("select_"):
+        idx     = int(data.split("_")[1])
+        results = context.user_data.get('results', [])
+
+        if idx >= len(results):
+            await cb.edit_message_text("❌ انتهت صلاحية هذه النتيجة، ابحث مجدداً.")
+            return
+
+        entry = results[idx]
+        url   = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
+        title = entry.get('title', 'نشيد')
+
+        context.user_data['current_url']   = url
+        context.user_data['current_title'] = title
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎧 صوت (MP3)", callback_data="download_audio"),
+            InlineKeyboardButton("🎬 فيديو (MP4)", callback_data="download_video"),
+        ],[
+            InlineKeyboardButton("🔙 العودة للنتائج", callback_data=f"page_{context.user_data.get('page', 0)}")
+        ]])
+
+        short = title[:60] + "…" if len(title) > 60 else title
+        await cb.edit_message_text(
+            text         = f"📋 *{short}*\n\nاختر نوع التحميل:",
+            parse_mode   = "Markdown",
+            reply_markup = keyboard
+        )
+        return
+
+    # ── تحميل الملف ──────────────────────────────────
+    if data in ("download_audio", "download_video"):
         download_type = "audio" if data == "download_audio" else "video"
-        url = context.user_data.get("current_url")
-        title = context.user_data.get("current_title")
+        url           = context.user_data.get('current_url')
+        title         = context.user_data.get('current_title', 'نشيد')
 
-        await query.edit_message_text(text="⏳ جاري التحميل والمعالجة، يرجى الانتظار...")
+        if not url:
+            await cb.edit_message_text("❌ انتهت صلاحية الجلسة، ابحث مجدداً.")
+            return
+
+        await cb.edit_message_text("⏳ جاري التحميل والمعالجة، يرجى الانتظار…")
 
         try:
-            loop = asyncio.get_event_loop()
-            media_path, final_title = await loop.run_in_executor(None, download_media, url, download_type)
+            loop       = asyncio.get_event_loop()
+            media_path, final_title = await loop.run_in_executor(
+                None, download_media, url, download_type
+            )
 
-            if os.path.exists(media_path):
-                await query.edit_message_text(text="⚡ جاري الرفع المنظم إلى تيلجرام...")
+            if not os.path.exists(media_path):
+                await cb.edit_message_text("❌ فشل معالجة الملف، جرّب مجدداً.")
+                return
 
-                with open(media_path, 'rb') as file:
-                    if download_type == "audio":
-                        await query.message.reply_audio(audio=file, title=final_title, caption=f"🎧 {final_title}")
-                    else:
-                        await query.message.reply_video(video=file, caption=f"🎬 {final_title}")
-
+            file_size = os.path.getsize(media_path)
+            if file_size > 50 * 1024 * 1024:
                 os.remove(media_path)
-                await query.message.delete()
-            else:
-                await query.edit_message_text("❌ فشل معالجة الملف.")
+                await cb.edit_message_text("⚠️ حجم الملف أكبر من 50MB وهو الحد الأقصى لتيلجرام.")
+                return
+
+            await cb.edit_message_text("⚡ جاري الرفع إلى تيلجرام…")
+
+            with open(media_path, 'rb') as f:
+                if download_type == "audio":
+                    await cb.message.reply_audio(audio=f, title=final_title, caption=f"🎧 {final_title}")
+                else:
+                    await cb.message.reply_video(video=f, caption=f"🎬 {final_title}")
+
+            os.remove(media_path)
+            await cb.message.delete()
 
         except Exception as e:
-            print(f"Error: {e}")
-            await query.edit_message_text("❌ حدث خطأ أثناء جلب الملف.")
+            print(f"Download Error: {e}")
+            await cb.edit_message_text("❌ حدث خطأ أثناء التحميل، جرّب مجدداً.")
 
+# ─────────────────────────────────────────────
 def main():
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
+    os.makedirs('downloads', exist_ok=True)
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
