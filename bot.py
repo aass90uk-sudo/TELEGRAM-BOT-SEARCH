@@ -24,15 +24,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # دالة البحث في يوتيوب (أسرع وأضمن)
 def search_youtube_results(query):
     ydl_opts = {
-        'default_search': 'ytsearch3',  # البحث في يوتيوب وجلب أول 3 نتائج
         'quiet': True,
         'noplaylist': True,
-        'extract_flat': True
+        'extract_flat': 'in_playlist',
+        'skip_download': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"أنشودة {query}", download=False) # يضيف كلمة أنشودة تلقائياً لضمان الدقة
-        if 'entries' in info:
-            return info['entries'][:3]
+        info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+        if info and 'entries' in info:
+            return [e for e in info['entries'] if e][:5]
         return []
 
 def download_media(url, download_type):
@@ -83,7 +83,7 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for idx, entry in enumerate(results):
             title = entry.get('title', f'نتيجة {idx+1}')
             short_title = title[:40] + "..." if len(title) > 40 else title
-            video_url = entry.get('url') if entry.get('url') else f"https://youtube.com{entry.get('id')}"
+            video_url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
 
             context.user_data[f"url_{idx}"] = video_url
             context.user_data[f"title_{idx}"] = title
